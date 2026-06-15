@@ -99,6 +99,11 @@ DEFAULT_SETTINGS = {
     # unbounded model/API bill. Other values are bounded to [60, 86400].
     # Tune via Settings or by editing data/settings.json.
     "research_run_timeout_seconds": 1800,
+    # Which backend handles the agent turn. "" / "odysseus" (default) runs the
+    # local agent loop. "ellie" proxies the turn to the external Ellie service
+    # (config.llm.ellie_backend_url + .ellie_backend_token) via its
+    # POST /api/odysseus/turn, relaying its SSE shapes through unchanged.
+    "agent_backend": "",
     "agent_max_tool_calls": 0,
     "agent_max_rounds": 20,  # per-message agent step cap (clamped 1..200)
     "agent_input_token_budget": 6000,

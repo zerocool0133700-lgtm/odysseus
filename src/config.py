@@ -53,6 +53,13 @@ class LLMConfig(BaseSettings):
     openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key if using OpenAI")
     openai_compat_path: str = Field(default="/v1/chat/completions", description="OpenAI compatible API path")
     
+    # External "Ellie" agent backend. When the `agent_backend` setting (see
+    # src/settings.py DEFAULT_SETTINGS) resolves to "ellie", the chat stream is
+    # proxied to this service's POST /api/odysseus/turn instead of running the
+    # local agent loop. The service emits Odysseus's exact SSE shapes.
+    ellie_backend_url: str = Field(default="http://127.0.0.1:8765", description="Base URL of the external Ellie agent backend")
+    ellie_backend_token: str = Field(default="", description="Bearer token sent to the Ellie agent backend")
+
     # LLM behavior
     max_context_messages: int = Field(default=90, description="Maximum number of context messages to keep")
     request_timeout: int = Field(default=20, description="Request timeout in seconds")

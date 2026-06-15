@@ -1164,27 +1164,71 @@ def setup_chat_routes(
                         _max_rounds = _DEFAULT_ROUNDS
                     _max_rounds = max(1, min(_max_rounds, 200))
 
-                    async for chunk in stream_agent_loop(
-                        sess.endpoint_url,
-                        sess.model,
-                        messages,
-                        headers=sess.headers,
-                        temperature=ctx.preset.temperature,
-                        max_tokens=ctx.preset.max_tokens,
-                        prompt_type=preset_id,
-                        max_tool_calls=_tool_budget,
-                        max_rounds=_max_rounds,
-                        context_length=ctx.context_length,
-                        active_document=active_doc,
-                        session_id=session,
-                        disabled_tools=disabled_tools if disabled_tools else None,
-                        tool_policy=tool_policy,
-                        owner=_user,
-                        fallbacks=_fallback_candidates,
-                        plan_mode=plan_mode,
-                        approved_plan=approved_plan or None,
-                        workspace=workspace or None,
-                    ):
+                    def _local_agent_loop():
+                        return stream_agent_loop(
+                            sess.endpoint_url,
+                            sess.model,
+                            messages,
+                            headers=sess.headers,
+                            temperature=ctx.preset.temperature,
+                            max_tokens=ctx.preset.max_tokens,
+                            prompt_type=preset_id,
+                            max_tool_calls=_tool_budget,
+                            max_rounds=_max_rounds,
+                            context_length=ctx.context_length,
+                            active_document=active_doc,
+                            session_id=session,
+                            disabled_tools=disabled_tools if disabled_tools else None,
+                            tool_policy=tool_policy,
+                            owner=_user,
+                            fallbacks=_fallback_candidates,
+                            plan_mode=plan_mode,
+                            approved_plan=approved_plan or None,
+                            workspace=workspace or None,
+                        )
+
+                    # External "Ellie" backend: proxy the turn to its
+                    # POST /api/odysseus/turn (it emits Odysseus's exact SSE
+                    # shapes) instead of running the local agent loop. Fail-soft:
+                    # if Ellie is unreachable BEFORE any byte is relayed, fall
+                    # back to the local loop. The relay yields the same
+                    # ``data: {json}\n\n`` / ``data: [DONE]\n\n`` framing, so the
+                    # downstream processing below (delta accumulation, [DONE] →
+                    # save) handles it unchanged.
+                    from src.ellie_backend import (
+                        is_ellie_backend as _is_ellie_backend,
+                        stream_ellie_backend as _stream_ellie_backend,
+                        EllieBackendError as _EllieBackendError,
+                    )
+
+                    async def _agent_chunk_source():
+                        if _is_ellie_backend():
+                            from src.config import config as _app_config
+                            _cfg = _app_config.llm
+                            try:
+                                _relay = _stream_ellie_backend(
+                                    messages,
+                                    session,
+                                    base_url=_cfg.ellie_backend_url,
+                                    token=_cfg.ellie_backend_token,
+                                )
+                                _first = await _relay.__anext__()
+                            except _EllieBackendError as _err:
+                                logger.warning(
+                                    "Ellie backend unreachable (session %s), falling back to local agent loop: %s",
+                                    session, _err,
+                                )
+                            except StopAsyncIteration:
+                                return
+                            else:
+                                yield _first
+                                async for _c in _relay:
+                                    yield _c
+                                return
+                        async for _c in _local_agent_loop():
+                            yield _c
+
+                    async for chunk in _agent_chunk_source():
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
                                 data = json.loads(chunk[6:])
