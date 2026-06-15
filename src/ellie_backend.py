@@ -12,7 +12,7 @@ can be unit-tested in isolation without importing the full FastAPI/DB stack.
 
 import json
 import logging
-from typing import AsyncGenerator, Callable, List, Optional
+from typing import AsyncGenerator, Callable, Iterable, List, Optional
 
 import httpx
 
@@ -51,6 +51,10 @@ async def stream_ellie_backend(
     *,
     base_url: str,
     token: str = "",
+    model: Optional[str] = None,
+    endpoint_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    disabled_tools: Optional[Iterable[str]] = None,
     on_delta: Optional[Callable[[str], None]] = None,
     timeout: float = 300.0,
     connect_timeout: float = 10.0,
@@ -70,6 +74,18 @@ async def stream_ellie_backend(
     """
     url = base_url.rstrip("/") + TURN_PATH
     payload = {"messages": messages, "session_id": session_id}
+    # Optional per-session overrides. When the session pins a model/endpoint/key,
+    # forward them so Ellie drives the turn with the session's model + permissions
+    # instead of falling back to her own. Omitted when empty so a plain session
+    # keeps the old {messages, session_id} body (backward-compat).
+    if model:
+        payload["model"] = model
+    if endpoint_url:
+        payload["endpoint_url"] = endpoint_url
+    if api_key:
+        payload["api_key"] = api_key
+    if disabled_tools:
+        payload["disabled_tools"] = sorted(disabled_tools)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
 
     started = False
