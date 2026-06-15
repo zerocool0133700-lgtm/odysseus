@@ -1228,6 +1228,7 @@ def setup_chat_routes(
                         is_ellie_backend as _is_ellie_backend,
                         stream_ellie_backend as _stream_ellie_backend,
                         EllieBackendError as _EllieBackendError,
+                        format_recall as _format_recall,
                     )
 
                     async def _agent_chunk_source():
@@ -1270,6 +1271,7 @@ def setup_chat_routes(
                                     endpoint_url=_ellie_endpoint,
                                     api_key=_ellie_key,
                                     disabled_tools=_ellie_disabled,
+                                    recall=_format_recall(ctx.used_memories),
                                 )
                                 _first = await _relay.__anext__()
                             except _EllieBackendError as _err:
