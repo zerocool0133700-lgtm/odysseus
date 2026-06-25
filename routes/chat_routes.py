@@ -1052,7 +1052,11 @@ def setup_chat_routes(
                 yield "data: [DONE]\n\n"
                 _active_streams.pop(session, None)
                 return
-            elif chat_mode == "chat":
+            elif chat_mode == "chat" and not _is_ellie_backend():
+                # When Ellie is the backend she is the brain in BOTH modes: chat
+                # mode falls through to the agent path below and relays to Ellie
+                # with no_tools=True (conversational Ellie). Only when Ellie is
+                # NOT the backend does chat mode use the plain local-model path.
                 _chat_start = time.time()
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 _requested_model = sess.model
@@ -1281,6 +1285,7 @@ def setup_chat_routes(
                                     api_key=_ellie_key,
                                     disabled_tools=_ellie_disabled,
                                     recall=_format_recall(ctx.used_memories),
+                                    no_tools=(chat_mode == "chat"),
                                 )
                                 _first = await _relay.__anext__()
                             except _EllieBackendError as _err:
