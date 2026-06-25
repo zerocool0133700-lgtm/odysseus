@@ -995,9 +995,18 @@ def setup_chat_routes(
             except Exception:
                 _fallback_candidates = []
 
-            # Send model name early so the frontend can show it during streaming
+            # Send model name early so the frontend can show it during streaming.
+            # When the Ellie backend drives the turn she keeps her OWN model (the
+            # local session model is not used), so label the responder "Ellie"
+            # rather than the unused session model. The real engine still appears
+            # in the final metrics event.
             _model_suffix = "Research" if effective_do_research else None
-            _model_info = {"type": "model_info", "model": sess.model}
+            try:
+                from src.ellie_backend import is_ellie_backend as _is_ellie_backend
+                _display_model = "Ellie" if _is_ellie_backend() else sess.model
+            except Exception:
+                _display_model = sess.model
+            _model_info = {"type": "model_info", "model": _display_model}
             if _model_suffix:
                 _model_info["suffix"] = _model_suffix
             if ctx.preset.character_name:
