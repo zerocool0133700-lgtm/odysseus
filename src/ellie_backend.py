@@ -75,6 +75,7 @@ async def stream_ellie_backend(
     api_key: Optional[str] = None,
     disabled_tools: Optional[Iterable[str]] = None,
     recall: Optional[str] = None,
+    no_tools: bool = False,
     on_delta: Optional[Callable[[str], None]] = None,
     timeout: float = 300.0,
     connect_timeout: float = 10.0,
@@ -108,6 +109,9 @@ async def stream_ellie_backend(
         payload["disabled_tools"] = sorted(disabled_tools)
     if recall:
         payload["recall"] = recall
+    if no_tools:
+        # Odysseus "chat" mode: Ellie answers conversationally with no tools.
+        payload["no_tools"] = True
     headers = {"Authorization": f"Bearer {token}"} if token else {}
 
     started = False
