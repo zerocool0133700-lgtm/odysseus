@@ -226,6 +226,76 @@ async def test_midstream_failure_emits_clean_error_not_crash(monkeypatch):
     assert out[-1] == "data: [DONE]\n\n"
 
 
+async def test_session_params_included_in_payload(monkeypatch):
+    # When the session pins a model/endpoint/key + has tool denials, the forwarder
+    # includes them in the POST body so Ellie drives the session's model + perms.
+    capture = {}
+    _patch_client(monkeypatch, capture, ["data: [DONE]"])
+    async for _ in stream_ellie_backend(
+        [{"role": "user", "content": "hi"}],
+        "sess-9",
+        base_url="http://h",
+        token="t",
+        model="claude-x",
+        endpoint_url="https://api.example.com/v1",
+        api_key="sk-123",
+        disabled_tools={"bash", "python", "send_email"},
+    ):
+        pass
+    assert capture["json"] == {
+        "messages": [{"role": "user", "content": "hi"}],
+        "session_id": "sess-9",
+        "model": "claude-x",
+        "endpoint_url": "https://api.example.com/v1",
+        "api_key": "sk-123",
+        # disabled_tools is sorted for a deterministic body.
+        "disabled_tools": ["bash", "python", "send_email"],
+    }
+
+
+async def test_no_session_params_keeps_old_body(monkeypatch):
+    # Backward-compat: with no overrides the body is exactly {messages, session_id}.
+    capture = {}
+    _patch_client(monkeypatch, capture, ["data: [DONE]"])
+    async for _ in stream_ellie_backend(
+        [{"role": "user", "content": "hi"}],
+        "sess-old",
+        base_url="http://h",
+        model=None,
+        endpoint_url=None,
+        api_key=None,
+        disabled_tools=None,
+    ):
+        pass
+    assert capture["json"] == {
+        "messages": [{"role": "user", "content": "hi"}],
+        "session_id": "sess-old",
+    }
+
+
+async def test_empty_disabled_tools_omitted(monkeypatch):
+    # An empty (but non-None) denylist must not add a key — still old body.
+    capture = {}
+    _patch_client(monkeypatch, capture, ["data: [DONE]"])
+    async for _ in stream_ellie_backend(
+        [], "s", base_url="http://h", disabled_tools=set(),
+    ):
+        pass
+    assert capture["json"] == {"messages": [], "session_id": "s"}
+
+
+def test_extract_api_key_handles_bearer_and_x_api_key():
+    from routes.chat_routes import _extract_api_key
+
+    assert _extract_api_key({"Authorization": "Bearer abc"}) == "abc"
+    # Case-insensitive header name + scheme.
+    assert _extract_api_key({"authorization": "bearer xyz"}) == "xyz"
+    assert _extract_api_key({"x-api-key": "k"}) == "k"
+    assert _extract_api_key({}) is None
+    assert _extract_api_key({"Authorization": "Basic zzz"}) is None
+    assert _extract_api_key(None) is None
+
+
 def test_is_ellie_backend_reads_setting(monkeypatch):
     import src.settings as settings
     monkeypatch.setattr(settings, "get_setting", lambda k, d=None: "ellie" if k == "agent_backend" else d)

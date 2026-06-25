@@ -41,12 +41,41 @@ from routes.chat_helpers import (
 )
 from src.action_intents import classify_tool_intent as _classify_tool_intent
 from src.tool_policy import build_effective_tool_policy
+from src.tool_security import blocked_tools_for_owner
+from typing import Optional as _Optional
 
 logger = logging.getLogger(__name__)
 
 # Track active streams for partial-save safety net
 _active_streams: Dict[str, dict] = {}
 _IMAGE_MODEL_PREFIXES = ("gpt-image", "dall-e", "chatgpt-image")
+
+
+def _extract_api_key(headers: dict) -> _Optional[str]:
+    """Pull the session's API key out of its outbound auth headers.
+
+    Handles ``Authorization: Bearer <key>`` (most endpoints) and ``x-api-key``
+    (Anthropic). Header names are matched case-insensitively. Returns ``None``
+    when no key is present so the caller simply omits it from the payload.
+    """
+    if not isinstance(headers, dict):
+        return None
+    lowered = {
+        str(k).lower(): v
+        for k, v in headers.items()
+        if isinstance(k, str)
+    }
+    auth = lowered.get("authorization")
+    if isinstance(auth, str):
+        stripped = auth.strip()
+        if stripped.lower().startswith("bearer "):
+            tok = stripped[7:].strip()
+            if tok:
+                return tok
+    xkey = lowered.get("x-api-key")
+    if isinstance(xkey, str) and xkey.strip():
+        return xkey.strip()
+    return None
 
 
 def _stream_set(session_id: str, **fields) -> None:
@@ -966,9 +995,18 @@ def setup_chat_routes(
             except Exception:
                 _fallback_candidates = []
 
-            # Send model name early so the frontend can show it during streaming
+            # Send model name early so the frontend can show it during streaming.
+            # When the Ellie backend drives the turn she keeps her OWN model (the
+            # local session model is not used), so label the responder "Ellie"
+            # rather than the unused session model. The real engine still appears
+            # in the final metrics event.
             _model_suffix = "Research" if effective_do_research else None
-            _model_info = {"type": "model_info", "model": sess.model}
+            try:
+                from src.ellie_backend import is_ellie_backend as _is_ellie_backend
+                _display_model = "Ellie" if _is_ellie_backend() else sess.model
+            except Exception:
+                _display_model = sess.model
+            _model_info = {"type": "model_info", "model": _display_model}
             if _model_suffix:
                 _model_info["suffix"] = _model_suffix
             if ctx.preset.character_name:
@@ -1199,18 +1237,50 @@ def setup_chat_routes(
                         is_ellie_backend as _is_ellie_backend,
                         stream_ellie_backend as _stream_ellie_backend,
                         EllieBackendError as _EllieBackendError,
+                        format_recall as _format_recall,
                     )
 
                     async def _agent_chunk_source():
                         if _is_ellie_backend():
                             from src.config import config as _app_config
                             _cfg = _app_config.llm
+                            # Assemble the per-session overrides so Ellie drives
+                            # the turn with the session's model + permissions.
+                            # Fail-soft: if anything raises while building these,
+                            # send none of them (Ellie uses her own model) rather
+                            # than breaking the turn.
+                            _ellie_model = None
+                            _ellie_endpoint = None
+                            _ellie_key = None
+                            _ellie_disabled = None
+                            try:
+                                _ellie_model = sess.model or None
+                                _ellie_endpoint = sess.endpoint_url or None
+                                _ellie_key = _extract_api_key(sess.headers)
+                                _policy_disabled = (
+                                    tool_policy.all_disabled_names() if tool_policy else set()
+                                )
+                                _ellie_disabled = (
+                                    blocked_tools_for_owner(_user) | set(_policy_disabled)
+                                ) or None
+                            except Exception as _e:
+                                logger.warning(
+                                    "Failed to assemble Ellie session params (session %s); "
+                                    "forwarding without overrides: %s",
+                                    session, _e,
+                                )
+                                _ellie_model = _ellie_endpoint = _ellie_key = _ellie_disabled = None
                             try:
                                 _relay = _stream_ellie_backend(
                                     messages,
                                     session,
                                     base_url=_cfg.ellie_backend_url,
                                     token=_cfg.ellie_backend_token,
+                                    model=_ellie_model,
+                                    endpoint_url=_ellie_endpoint,
+                                    api_key=_ellie_key,
+                                    disabled_tools=_ellie_disabled,
+                                    recall=_format_recall(ctx.used_memories),
                                 )
                                 _first = await _relay.__anext__()
                             except _EllieBackendError as _err:
