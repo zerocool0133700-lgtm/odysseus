@@ -2854,8 +2854,13 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
           }
         }
       } else {
-        // Stop streaming TTS on any error/abort
-        if (streamingTTS && window.aiTTSManager) window.aiTTSManager.stop();
+        // Stop streaming TTS on any error/abort. `streamingTTS` is declared with
+        // `const` inside the streaming try-block above, so it is out of scope in
+        // this catch handler — referencing it here threw a ReferenceError that
+        // aborted the rest of the error-path cleanup (leaking the stream's fetch
+        // connection; enough leaks exhausted the browser pool -> ERR_INSUFFICIENT_RESOURCES).
+        // `stop()` is a safe no-op when TTS is idle, so just guard on the manager.
+        if (window.aiTTSManager) window.aiTTSManager.stop();
 
         if (currentAbort && currentAbort.signal.aborted) {
           const abortReason = currentAbort._reason || '';
