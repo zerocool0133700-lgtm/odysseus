@@ -175,6 +175,7 @@ if AUTH_ENABLED:
         "/api/auth/signup",
         "/api/auth/login",
         "/api/auth/idp-login",
+        "/api/auth/callback",
         "/api/auth/logout",
         "/api/auth/status",
         "/api/auth/features",

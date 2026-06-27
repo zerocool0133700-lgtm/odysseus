@@ -55,4 +55,59 @@ def setup_idp_routes(auth_manager: AuthManager) -> APIRouter:
         )
         return resp
 
+    @router.get("/callback")
+    async def idp_callback(request: Request):
+        code = request.query_params.get("code")
+        state = request.query_params.get("state")
+        cookie_state = request.cookies.get(IDP_STATE_COOKIE)
+
+        def _fail(reason: str) -> RedirectResponse:
+            r = RedirectResponse(url=f"/?login_error={reason}", status_code=302)
+            r.delete_cookie(IDP_STATE_COOKIE, path="/api/auth/callback")
+            return r
+
+        # CSRF: the state in the URL must match the short-lived state cookie.
+        if (
+            not code
+            or not state
+            or not cookie_state
+            or not secrets.compare_digest(state, cookie_state)
+        ):
+            return _fail("idp_state")
+
+        try:
+            access_token = await asyncio.to_thread(exchange_code, code)
+            claims = verify_idp_token(access_token)
+        except Exception:
+            logger.warning("IdP callback exchange/verify failed", exc_info=False)
+            return _fail("idp")
+
+        try:
+            owner = auth_manager.resolve_idp_owner()
+        except Exception:
+            logger.warning("IdP owner resolution failed", exc_info=False)
+            return _fail("idp_owner")
+
+        # Audit record is best-effort — never block login on it.
+        try:
+            auth_manager.record_idp_identity(
+                owner, claims.get("userId"), claims.get("email")
+            )
+        except Exception:
+            logger.warning("record_idp_identity failed (non-fatal)", exc_info=False)
+
+        token = await asyncio.to_thread(auth_manager.create_session_trusted, owner)
+        resp = RedirectResponse(url="/", status_code=302)
+        resp.set_cookie(
+            key=SESSION_COOKIE,
+            value=token,
+            httponly=True,
+            samesite="lax",
+            secure=_secure_cookies(),
+            path="/",
+            max_age=60 * 60 * 24 * 7,
+        )
+        resp.delete_cookie(IDP_STATE_COOKIE, path="/api/auth/callback")
+        return resp
+
     return router
