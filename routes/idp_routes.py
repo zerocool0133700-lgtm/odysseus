@@ -27,7 +27,11 @@ def _secure_cookies() -> bool:
 
 
 def _request_origin(request: Request) -> str:
-    """Origin of the incoming request (single-origin app)."""
+    """Origin of the incoming request (single-origin app).
+
+    Derived from the Host request header. Callback-URL safety relies on the
+    IdP's IDP_REDIRECT_ALLOWLIST rejecting any origin not explicitly permitted.
+    """
     host = request.headers.get("host", request.url.netloc)
     return f"{request.url.scheme}://{host}"
 
@@ -57,6 +61,8 @@ def setup_idp_routes(auth_manager: AuthManager) -> APIRouter:
 
     @router.get("/callback")
     async def idp_callback(request: Request):
+        if not _idp_limiter.check(request.client.host):
+            return RedirectResponse(url="/?login_error=rate_limited", status_code=302)
         code = request.query_params.get("code")
         state = request.query_params.get("state")
         cookie_state = request.cookies.get(IDP_STATE_COOKIE)

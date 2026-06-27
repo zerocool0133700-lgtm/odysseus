@@ -54,6 +54,7 @@ def test_callback_missing_state_cookie(tmp_path, monkeypatch):
     resp = client.get("/api/auth/callback?code=c&state=st8", follow_redirects=False)
     assert resp.status_code == 302
     assert resp.headers["location"] == "/?login_error=idp_state"
+    assert "odysseus_session=" not in resp.headers.get("set-cookie", "")
 
 
 def test_callback_exchange_failure_no_session(tmp_path, monkeypatch):
@@ -74,6 +75,7 @@ def test_callback_verify_failure_no_session(tmp_path, monkeypatch):
     client.cookies.set(IDP_STATE_COOKIE, "st8", path="/api/auth/callback")
     resp = client.get("/api/auth/callback?code=c&state=st8", follow_redirects=False)
     assert resp.headers["location"] == "/?login_error=idp"
+    assert "odysseus_session=" not in resp.headers.get("set-cookie", "")
 
 
 def test_callback_owner_resolution_failure(tmp_path, monkeypatch):
@@ -85,3 +87,15 @@ def test_callback_owner_resolution_failure(tmp_path, monkeypatch):
     assert resp.status_code == 302
     assert resp.headers["location"] == "/?login_error=idp_owner"
     assert "odysseus_session=" not in resp.headers.get("set-cookie", "")
+
+
+def test_callback_rate_limited_after_burst(tmp_path, monkeypatch):
+    client, mgr = _setup(tmp_path, monkeypatch)
+    client.cookies.set(IDP_STATE_COOKIE, "st8", path="/api/auth/callback")
+    # 10 allowed, 11th blocked (limiter is 10/60s; check() returns False once
+    # the window already holds max_requests timestamps)
+    last = None
+    for _ in range(11):
+        last = client.get("/api/auth/callback?code=c&state=st8", follow_redirects=False)
+    assert last.status_code == 302
+    assert last.headers["location"] == "/?login_error=rate_limited"
