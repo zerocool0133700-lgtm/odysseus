@@ -287,6 +287,8 @@
     <button type="submit" id="submitBtn">Sign In</button>
   </form>
 
+  <button type="button" id="idpBtn" style="display:none">Sign in with Ellie</button>
+
   <div class="toggle" id="toggleArea" style="display:none">
     <span id="toggleText">Don't have an account? </span>
     <a id="toggleLink" href="#">Sign up</a>
@@ -363,6 +365,16 @@
     const data = await res.json();
     if (data.authenticated) {
       window.location.replace('/');
+      return;
+    }
+    if (data.idp_enabled) {
+      form.style.display = 'none';
+      toggleArea.style.display = 'none';
+      const idpBtn = document.getElementById('idpBtn');
+      idpBtn.style.display = '';
+      idpBtn.addEventListener('click', () => {
+        window.location.href = '/api/auth/idp-login';
+      });
       return;
     }
     signupAllowed = !!data.signup_enabled;
