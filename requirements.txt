@@ -39,6 +39,7 @@ cryptography
 bcrypt
 mcp
 pyotp
+PyJWT
 qrcode[pil]
 croniter
 pytest
