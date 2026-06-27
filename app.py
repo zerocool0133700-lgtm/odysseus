@@ -174,6 +174,7 @@ if AUTH_ENABLED:
         "/api/auth/setup",
         "/api/auth/signup",
         "/api/auth/login",
+        "/api/auth/idp-login",
         "/api/auth/logout",
         "/api/auth/status",
         "/api/auth/features",
@@ -542,6 +543,9 @@ webhook_manager = WebhookManager(api_key_manager=api_key_manager)
 # Auth
 auth_router = setup_auth_routes(auth_manager)
 app.include_router(auth_router)
+
+from routes.idp_routes import setup_idp_routes
+app.include_router(setup_idp_routes(auth_manager))
 
 # Uploads
 from routes.upload_routes import setup_upload_routes
