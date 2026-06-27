@@ -513,6 +513,50 @@ class AuthManager:
         self._save_sessions()
         return token
 
+    def resolve_idp_owner(self) -> str:
+        """Resolve the single Odysseus owner an IdP login maps to.
+
+        Server-side only — never derived from the JWT. Returns
+        ODYSSEUS_IDP_OWNER if set and that user exists; else the sole user
+        when exactly one exists; else raises ValueError (ambiguous / none /
+        unknown configured user). The caller redirects to /?login_error=idp_owner
+        on ValueError.
+        """
+        configured = os.getenv("ODYSSEUS_IDP_OWNER", "").strip().lower()
+        with self._config_lock:
+            usernames = list(self._config.get("users", {}).keys())
+        if configured:
+            if configured in usernames:
+                return configured
+            raise ValueError(
+                f"ODYSSEUS_IDP_OWNER='{configured}' is not an existing user"
+            )
+        if len(usernames) == 1:
+            return usernames[0]
+        raise ValueError(
+            f"Cannot resolve IdP owner: {len(usernames)} users exist; "
+            "set ODYSSEUS_IDP_OWNER"
+        )
+
+    def record_idp_identity(
+        self, username: str, idp_user_id: Optional[str], email: Optional[str]
+    ) -> None:
+        """Record the IdP identity on the mapped user's auth.json entry.
+
+        Additive (for audit/reconciliation only): does not change is_admin,
+        privileges, or the owner key (username). No-op if the user is absent.
+        """
+        username = username.strip().lower()
+        with self._config_lock:
+            users = self._config.get("users", {})
+            if username not in users:
+                return
+            if idp_user_id:
+                users[username]["idp_user_id"] = idp_user_id
+            if email:
+                users[username]["email"] = email
+            self._save()
+
     def validate_token(self, token: Optional[str]) -> bool:
         if not token:
             return False

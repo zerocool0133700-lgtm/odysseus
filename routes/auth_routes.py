@@ -1,6 +1,7 @@
 """Authentication routes — login, logout, signup, status, user management."""
 
 from fastapi import APIRouter, Request, Response, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 import asyncio
@@ -79,6 +80,10 @@ class SetOpenRegistrationRequest(BaseModel):
 SESSION_COOKIE = "odysseus_session"
 
 
+def _idp_enabled() -> bool:
+    return os.getenv("AUTH_IDP_ENABLED", "false").lower() == "true"
+
+
 def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
     router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -107,6 +112,11 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
     @router.post("/signup")
     async def signup(body: SignupRequest, request: Request):
         """Create a new user account. Only works if signup is enabled by admin."""
+        if _idp_enabled():
+            return JSONResponse(
+                status_code=403,
+                content={"ok": False, "error": "Password login disabled; use the IdP"},
+            )
         if not _signup_limiter.check(request.client.host):
             raise HTTPException(429, "Too many requests — try again later")
         if not auth_manager.is_configured:
@@ -124,6 +134,11 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
 
     @router.post("/login")
     async def login(body: LoginRequest, request: Request, response: Response):
+        if _idp_enabled():
+            return JSONResponse(
+                status_code=403,
+                content={"ok": False, "error": "Password login disabled; use the IdP"},
+            )
         if not _login_limiter.check(request.client.host):
             raise HTTPException(429, "Too many requests — try again later")
         # Verify password first
@@ -165,6 +180,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         token = request.cookies.get(SESSION_COOKIE)
         result = auth_manager.status(token)
         result["signup_enabled"] = auth_manager.signup_enabled
+        result["idp_enabled"] = _idp_enabled()
         # Include the caller's effective privileges so the frontend can
         # hide / dim UI controls the user isn't allowed to use. Admins get
         # ADMIN_PRIVILEGES (everything on), regular users get their stored
